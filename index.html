@@ -1,0 +1,274 @@
+```react
+import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  onSnapshot, 
+  setDoc, 
+  query 
+} from 'firebase/firestore';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  signInWithCustomToken, 
+  onAuthStateChanged 
+} from 'firebase/auth';
+import { 
+  Menu, 
+  ShoppingCart, 
+  Globe, 
+  ChevronDown, 
+  ChevronUp,
+  Plus,
+  Image as ImageIcon,
+  X,
+  Sparkles,
+  Loader2
+} from 'lucide-react';
+
+// --- Firebase Config ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'ff-news-portal';
+const apiKey = ""; 
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [news, setNews] = useState([]);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [category, setCategory] = useState('TẤT CẢ');
+  
+  // Admin form states
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [imageUrl, setImageUrl] = useState("");
+  const [prompt, setPrompt] = useState("");
+
+  useEffect(() => {
+    const initAuth = async () => {
+      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        await signInWithCustomToken(auth, __initial_auth_token);
+      } else {
+        await signInAnonymously(auth);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const newsRef = collection(db, 'artifacts', appId, 'public', 'data', 'news');
+    const unsub = onSnapshot(newsRef, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setNews(data.sort((a, b) => b.timestamp - a.timestamp));
+    });
+    return () => unsub();
+  }, [user]);
+
+  const generateAIImage = async () => {
+    if (!prompt) return;
+    setIsGenerating(true);
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instances: [{ prompt: `Free Fire game style banner, high quality, professional esports: ${prompt}` }],
+          parameters: { sampleCount: 1 }
+        })
+      });
+      const result = await response.json();
+      setImageUrl(`data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const addArticle = async (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const id = Date.now().toString();
+    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'news', id), {
+      title: formData.get('title'),
+      type: formData.get('type'),
+      date: new Date().toLocaleDateString('vi-VN'),
+      image: imageUrl || formData.get('linkImage'),
+      timestamp: Date.now()
+    });
+    e.target.reset();
+    setImageUrl("");
+    setPrompt("");
+  };
+
+  const filteredNews = category === 'TẤT CẢ' ? news : news.filter(n => n.type === category);
+
+  return (
+    <div className="min-h-screen bg-[#f4f4f4] text-[#333] font-sans pb-10">
+      {/* Navbar Garena Style */}
+      <nav className="bg-black text-white h-14 flex items-center justify-between px-4 sticky top-0 z-50">
+        <div className="flex items-center gap-4">
+          <img src="https://ff.garena.vn/static/media/logo_ff.70617300.png" alt="FF Logo" className="h-8" />
+        </div>
+        <div className="flex items-center gap-5">
+          <ShoppingCart className="w-5 h-5 cursor-pointer" />
+          <Globe className="w-5 h-5 cursor-pointer" />
+          <Menu className="w-6 h-6 cursor-pointer" onClick={() => setIsAdmin(!isAdmin)} />
+        </div>
+      </nav>
+
+      {/* Hero Banner Carousel (Simplified) */}
+      <div className="w-full aspect-[16/9] relative overflow-hidden bg-slate-200">
+        <img 
+          src={news[0]?.image || "https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=2000"} 
+          className="w-full h-full object-cover transition-all" 
+          alt="Featured"
+        />
+        <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-2">
+          {[1, 2, 3, 4, 5].map(i => (
+            <div key={i} className={`w-2 h-2 rounded-full ${i === 1 ? 'bg-orange-500 w-4' : 'bg-white/50'}`} />
+          ))}
+        </div>
+      </div>
+
+      {/* Category Filter */}
+      <div className="px-4 py-6">
+        <div className="relative">
+          <button 
+            onClick={() => setFilterOpen(!filterOpen)}
+            className="w-full bg-white h-14 rounded shadow-sm border flex items-center justify-between px-6 font-bold text-sm tracking-widest"
+          >
+            <div className="flex items-center gap-3 uppercase">
+              <div className="grid grid-cols-2 gap-0.5 w-4 h-4">
+                <div className="bg-black w-full h-full" />
+                <div className="bg-black w-full h-full" />
+                <div className="bg-black w-full h-full" />
+                <div className="bg-black w-full h-full" />
+              </div>
+              {category}
+            </div>
+            {filterOpen ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+          </button>
+          
+          {filterOpen && (
+            <div className="absolute top-16 left-0 right-0 bg-white shadow-xl rounded z-40 border overflow-hidden">
+              {['TẤT CẢ', 'BẢN TIN', 'SỰ KIỆN', 'CẬP NHẬT'].map(cat => (
+                <div 
+                  key={cat}
+                  onClick={() => { setCategory(cat); setFilterOpen(false); }}
+                  className="p-4 hover:bg-slate-50 border-b last:border-0 font-bold text-xs cursor-pointer"
+                >
+                  {cat}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Admin Post Form */}
+      {isAdmin && (
+        <div className="px-4 mb-8">
+          <div className="bg-white p-6 rounded-lg border-2 border-orange-500 shadow-lg">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="font-black text-orange-500 uppercase tracking-tighter">ĐĂNG TIN NHƯ VIDEO</h2>
+              <X className="cursor-pointer" onClick={() => setIsAdmin(false)} />
+            </div>
+            <form onSubmit={addArticle} className="space-y-4">
+              <input name="title" placeholder="Tiêu đề bài viết..." className="w-full p-3 bg-slate-50 rounded border font-bold text-sm" required />
+              <select name="type" className="w-full p-3 bg-slate-50 rounded border font-bold text-sm">
+                <option value="BẢN TIN">BẢN TIN</option>
+                <option value="SỰ KIỆN">SỰ KIỆN</option>
+                <option value="CẬP NHẬT">CẬP NHẬT</option>
+              </select>
+              
+              <div className="border p-3 rounded bg-slate-50">
+                <p className="text-[10px] font-bold text-slate-400 mb-2 uppercase">Hình ảnh bài viết</p>
+                <input name="linkImage" placeholder="Dán link ảnh tại đây..." className="w-full p-2 bg-white rounded border text-xs mb-3" />
+                <div className="flex gap-2">
+                  <input value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Hoặc mô tả để AI vẽ..." className="flex-1 p-2 bg-white rounded border text-xs" />
+                  <button type="button" onClick={generateAIImage} disabled={isGenerating} className="bg-black text-white px-3 py-2 rounded text-xs font-bold flex items-center gap-1">
+                    {isGenerating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />} AI
+                  </button>
+                </div>
+                {imageUrl && <img src={imageUrl} className="mt-3 w-full h-32 object-cover rounded" alt="Preview" />}
+              </div>
+              
+              <button type="submit" className="w-full bg-orange-600 text-white py-3 font-black tracking-widest rounded shadow-lg shadow-orange-200">XUẤT BẢN NGAY</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* News List */}
+      <div className="px-4 space-y-6">
+        {filteredNews.length === 0 && (
+          <div className="text-center py-20 opacity-20">
+             <ImageIcon className="w-16 h-16 mx-auto mb-2" />
+             <p className="font-bold">Chưa có bài viết nào</p>
+          </div>
+        )}
+        
+        {filteredNews.map((item) => (
+          <div key={item.id} className="bg-white rounded overflow-hidden shadow-sm hover:shadow-md transition-shadow group cursor-pointer">
+            <div className="relative aspect-video overflow-hidden">
+              <img 
+                src={item.image || "https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=1000"} 
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
+                alt={item.title}
+              />
+              <div className="absolute inset-0 bg-black/5" />
+            </div>
+            <div className="p-4 border-b">
+              <div className="flex items-center text-[11px] font-bold text-slate-400 gap-2 mb-2 uppercase tracking-tight">
+                <span>{item.date}</span>
+                <span className="text-slate-200">|</span>
+                <span className="text-black">{item.type}</span>
+              </div>
+              <h3 className="font-black text-lg leading-tight uppercase group-hover:text-orange-500 transition-colors">
+                {item.title}
+              </h3>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Load More Button Style */}
+      <div className="mt-10 px-4 flex justify-center">
+        <button className="flex items-center gap-2 font-black text-xs tracking-widest uppercase border-b-2 border-black pb-1">
+          TẢI THÊM <ChevronDown className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Footer Garena Style */}
+      <footer className="mt-20 px-8 py-10 bg-white border-t">
+        <div className="flex flex-col items-center text-center">
+          <img src="https://upload.wikimedia.org/wikipedia/commons/e/e0/Garena_logo.svg" className="h-10 mb-6 grayscale" alt="Garena" />
+          <p className="text-[10px] text-slate-400 leading-relaxed font-bold uppercase tracking-tighter mb-8">
+            Công ty TNHH dịch vụ phần mềm thiên bình<br/>
+            Sáng lập giải đấu FFWS toàn cầu<br/>
+            Liên hệ: hiền@esports.vn
+          </p>
+          <div className="flex gap-4 text-[10px] font-black uppercase tracking-widest">
+            <span className="border-b">BẢO MẬT</span>
+            <span className="border-b">ĐIỀU KHOẢN</span>
+            <span className="border-b">CÂU HỎI</span>
+          </div>
+          <div className="mt-10 p-2 border-2 border-black font-black text-[10px]">
+            18+ Chơi quá 180 phút một ngày sẽ ảnh hưởng xấu đến sức khỏe
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+```
+
